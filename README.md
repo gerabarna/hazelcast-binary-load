@@ -19,9 +19,9 @@ Thus it is only useful in scenarios where data is rarely updated.
 To enable the feature add the service in your hazelcast configuration add a service section ( or set the configuration programmatically):
 ```
 <services>
-    <aervice>
-        <name>BinaryLoadService</hz:name>
-        <class-name>hu.gerab.hz.binaryLoad.BinaryLoadService</hz:class-name>
+    <service>
+        <name>BinaryLoadService</name>
+        <class-name>hu.gerab.hz.binaryLoad.BinaryLoadService</class-name>
         <properties>
             <property name="hu.gerab.hazelcast.binaryLoad.enabled">
                 true
