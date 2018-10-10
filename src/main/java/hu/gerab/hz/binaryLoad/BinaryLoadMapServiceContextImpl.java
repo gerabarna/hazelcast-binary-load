@@ -7,14 +7,7 @@ import com.hazelcast.config.PartitioningStrategyConfig;
 import com.hazelcast.core.PartitioningStrategy;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.map.MapInterceptor;
-import com.hazelcast.map.impl.ListenerAdapter;
-import com.hazelcast.map.impl.LocalMapStatsProvider;
-import com.hazelcast.map.impl.MapContainer;
-import com.hazelcast.map.impl.MapKeyLoader;
-import com.hazelcast.map.impl.MapService;
-import com.hazelcast.map.impl.MapServiceContext;
-import com.hazelcast.map.impl.MapStoreWrapper;
-import com.hazelcast.map.impl.PartitionContainer;
+import com.hazelcast.map.impl.*;
 import com.hazelcast.map.impl.event.MapEventPublisher;
 import com.hazelcast.map.impl.eviction.ExpirationManager;
 import com.hazelcast.map.impl.mapstore.MapStoreContext;
@@ -38,6 +31,9 @@ import com.hazelcast.spi.EventFilter;
 import com.hazelcast.spi.NodeEngine;
 import com.hazelcast.spi.Operation;
 
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -51,12 +47,18 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class BinaryLoadMapServiceContextImpl implements MapServiceContext {
 
-    private final ILogger logger;
+    public static final String PARTITION_INFO_FILE = "partitions";
 
+    private final ILogger logger;
     private final MapServiceContext serviceContext;
 
     private final Map<String, Boolean> annotationCache = new HashMap<>();
-    private Map<String, BinaryLoadRecordStore> binaryLoadRecordStoreMap = new ConcurrentHashMap<>();
+    private final Map<String, Map<Integer, BinaryLoadRecordStore>> binaryLoadRecordStoreMap = new ConcurrentHashMap<>();
+
+    // The Service init is not running on the partition threads, so these need to be properly published
+    private boolean binaryLoadEnabled = false;
+    private boolean binaryLoadPartitionCountValid;
+    private Path storageDir;
 
     public BinaryLoadMapServiceContextImpl(MapServiceContext serviceContext) {
         this.serviceContext = serviceContext;
@@ -72,26 +74,75 @@ public class BinaryLoadMapServiceContextImpl implements MapServiceContext {
         boolean isAnnotationPresent = annotationCache.computeIfAbsent(name, cacheName -> isBinaryLoadAnnotationPresent(mapContainer));
         boolean isBinaryStore = inMemoryFormat == InMemoryFormat.BINARY;
 
-        if (isAnnotationPresent && isBinaryStore) {
-            logger.fine("Creating Binary load enabled Record store for cache=" + name + ", partition=" + partitionId);
+        if (binaryLoadEnabled && isAnnotationPresent && isBinaryStore) {
             ILogger logger = getNodeEngine().getLogger(BinaryLoadRecordStore.class);
-            BinaryLoadRecordStore binaryLoadRecordStore = new BinaryLoadRecordStore(mapContainer, partitionId, keyLoader, logger);
-            binaryLoadRecordStoreMap.put(name+partitionId, binaryLoadRecordStore);
+            logger.fine("Creating Binary load enabled Record store for cache=" + name + ", partition=" + partitionId);
+            BinaryLoadRecordStore binaryLoadRecordStore = new BinaryLoadRecordStore(mapContainer, partitionId, keyLoader, logger, binaryLoadPartitionCountValid, storageDir);
+            binaryLoadRecordStoreMap.computeIfAbsent(name, n -> new ConcurrentHashMap<>()).put(partitionId, binaryLoadRecordStore);
             return binaryLoadRecordStore;
         } else {
-            logger.fine("Skip creating Binary load Record store for cache=" + name + ", partition=" + partitionId + ", inMemoryFormat=" + inMemoryFormat + ", annotationPresent=" + isAnnotationPresent);
             ILogger logger = getNodeEngine().getLogger(DefaultRecordStore.class);
+            logger.fine("Skip creating Binary load Record store for cache=" + name + ", partition=" + partitionId + ", inMemoryFormat=" + inMemoryFormat + ", annotationPresent=" + isAnnotationPresent);
             return new DefaultRecordStore(mapContainer, partitionId, keyLoader, logger);
+        }
+    }
+
+    // this is only expected to be called once, but we need to publish the updated variables properly to the partition threads...
+    public synchronized void init(boolean binaryLoadEnabled, Path storageDir) {
+        this.binaryLoadEnabled = binaryLoadEnabled;
+        this.storageDir = storageDir;
+        int partitionCount = serviceContext.getNodeEngine().getPartitionService().getPartitionCount();
+        binaryLoadPartitionCountValid = validatePartitionInfo(storageDir, partitionCount);
+        if (!binaryLoadPartitionCountValid) {
+            logger.warning("Persisted partition count missing or does not match current partition count=" + partitionCount + ". Binary loading will be skipped!");
         }
     }
 
     @Override
     public void shutdown() {
-        binaryLoadRecordStoreMap.values().forEach(BinaryLoadRecordStore::persist);
+        persistBinaryInfo();
         serviceContext.shutdown();
     }
 
-    public static boolean isBinaryLoadAnnotationPresent(MapContainer mapContainer) {
+    private void persistBinaryInfo() {
+        if (!binaryLoadRecordStoreMap.isEmpty() && getNodeEngine().getPartitionService().getPartitionCount() > 0) {
+            try {
+                persistPartitionInfo(storageDir, getNodeEngine().getPartitionService().getPartitionCount());
+                //TODO this should be invoked on the partition threads instead of the current thread/generic executor pool( they may not be available during shutdown though )
+                binaryLoadRecordStoreMap.values().stream()
+                        .flatMap(map -> map.values().stream())
+                        .forEach(BinaryLoadRecordStore::persist);
+            } catch (IOException e) {
+                logger.severe("Failed to persist binary data for caches.", e);
+            }
+        }
+    }
+
+    private static void persistPartitionInfo(Path storageDir, int partitionCount) throws IOException {
+        Path file = storageDir.resolve(PARTITION_INFO_FILE);
+        Files.createDirectories(storageDir);
+
+        try (PrintWriter out = new PrintWriter(new FileOutputStream(file.toFile()))) {
+            out.write(Integer.toString(partitionCount));
+            out.close();
+        }
+    }
+
+    private boolean validatePartitionInfo(Path storageDir, int partitionCount) {
+        Path file = storageDir.resolve(PARTITION_INFO_FILE);
+        if (Files.exists(file)) {
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(new FileInputStream(file.toFile())))) {
+                int persistedPartitionCount = Integer.parseInt(in.readLine().trim());
+                return persistedPartitionCount == partitionCount;
+            } catch (IOException e) {
+                logger.severe("Failed to validate partition count. Binary loading will be disabled.");
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isBinaryLoadAnnotationPresent(MapContainer mapContainer) {
         Object storageImpl = Optional.of(mapContainer)
                 .map(MapContainer::getMapStoreContext)
                 .map(MapStoreContext::getMapStoreWrapper)

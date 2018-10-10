@@ -14,11 +14,11 @@ public class TestDataBinaryLoadMapLoader implements MapLoader<String, String> {
     private static final Map<String, String> testKeyToDataMap = new TreeMap<>();
 
     static {
-        testKeyToDataMap.put("Leo", "Loves Swords");
-        testKeyToDataMap.put("Raph", "Loves Fighting");
-        testKeyToDataMap.put("Donnie", "Loves Tech");
-
-        testKeyToDataMap.put("Mike", "Getting smacked");
+//        testKeyToDataMap.put("Key 1", "Binary Only");
+        testKeyToDataMap.put("Key 2", "MapLoader 2");
+        testKeyToDataMap.put("Key 3", "MapLoader 3");
+        testKeyToDataMap.put("Key 4", "MapLoader 4");
+        testKeyToDataMap.put("Key 5", "MapLoader 5");
     }
 
     public Map<String, String> getTestKeyToDataMap() {

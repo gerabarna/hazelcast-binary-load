@@ -11,14 +11,9 @@ import com.hazelcast.map.impl.recordstore.DefaultRecordStore;
 import com.hazelcast.map.impl.recordstore.Storage;
 import com.hazelcast.nio.serialization.Data;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
@@ -30,13 +25,16 @@ import static java.lang.String.format;
  */
 public class BinaryLoadRecordStore extends DefaultRecordStore {
 
-    private static final Path storageDir = Paths.get("").resolve("storage");
     public static final String EXTENSION = ".part";
     private final ILogger logger;
+    private final boolean enableBinaryLoad;
+    private final Path storageDir;
 
-    public BinaryLoadRecordStore(MapContainer mapContainer, int partitionId, MapKeyLoader keyLoader, ILogger logger) {
+    public BinaryLoadRecordStore(MapContainer mapContainer, int partitionId, MapKeyLoader keyLoader, ILogger logger, boolean enableLoad, Path storageDir) {
         super(mapContainer, partitionId, keyLoader, logger);
         this.logger = logger;
+        this.enableBinaryLoad = enableLoad;
+        this.storageDir = storageDir;
     }
 
     @Override
@@ -46,15 +44,22 @@ public class BinaryLoadRecordStore extends DefaultRecordStore {
 
     @Override
     public void startLoading() {
-        load();
+        //TODO This could take a while, and it is blocking the partition thread. maybe this should be offloaded somehow...
+        if (enableBinaryLoad) {
+            load();
+        }
         super.startLoading();
     }
 
-    public synchronized void persist() {
+    public Path getStorageDir() {
+        return storageDir;
+    }
+
+    public void persist() {
         persist(getStorageDir(), name, partitionId, ((ListableStorage<Record>) storage).getEntries(), logger);
     }
 
-    static void  persist(Path storageDir, String name, int partitionId, Set<Map.Entry<Data, Record>> entrySet, ILogger logger) {
+    static void persist(Path storageDir, String name, int partitionId, Set<Map.Entry<Data, Record>> entrySet, ILogger logger) {
         Path cacheDir = storageDir.resolve(name);
         try {
             Path filePath = getFilePath(Files.createDirectories(cacheDir), partitionId);
@@ -92,7 +97,7 @@ public class BinaryLoadRecordStore extends DefaultRecordStore {
         out.write(bytes);
     }
 
-    public synchronized void load() {
+    public void load() {
         load(getStorageDir(), name, partitionId, storage, recordFactory, logger);
     }
 
@@ -139,9 +144,5 @@ public class BinaryLoadRecordStore extends DefaultRecordStore {
         byte[] bytes = new byte[arraySize];
         in.readFully(bytes);
         return bytes;
-    }
-
-    public static Path getStorageDir() {
-        return storageDir;
     }
 }

@@ -1,29 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <beans xmlns="http://www.springframework.org/schema/beans"
-       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-       xmlns:hz="http://www.hazelcast.com/schema/spring"
-       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xmlns:hz="http://www.hazelcast.com/schema/spring"
+	   xmlns:context="http://www.springframework.org/schema/context"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
        http://www.hazelcast.com/schema/spring http://www.hazelcast.com/schema/spring/hazelcast-spring-3.6.xsd">
-
-    <hz:hazelcast id="hazelcastInstance">
-        <hz:config>
-            <hz:group name="dev" password="dev" />
-
-            <hz:properties>
-                <hz:property name="hazelcast.partition.count">4</hz:property>
-            </hz:properties>
-
-            <hz:map name="binaryLoadMap">
-                <hz:map-store enabled="true" write-delay-seconds="0" implementation="binaryLoadMapLoader" />
-            </hz:map>
-
-            <hz:lite-member enabled="false" />
-        </hz:config>
-    </hz:hazelcast>
-
-    <!--   SPRING BEANS   -->
-    <bean id="binaryLoadMapLoader" class="hu.gerab.hz.binaryLoad.helper.TestDataBinaryLoadMapLoader" />
-
-    <hz:map instance-ref="hazelcastInstance" id="binaryLoadMap" name="binaryLoadMap" />
+	
+	<context:property-placeholder location="classpath:application.properties"/>
+	
+	<hz:hazelcast id="hazelcastInstance">
+		<hz:config>
+			<hz:group name="dev" password="dev"/>
+			
+			<hz:properties>
+				<hz:property name="hazelcast.partition.count">4</hz:property>
+			</hz:properties>
+			
+			<hz:map name="binaryLoadMap">
+				<hz:map-store enabled="true" write-delay-seconds="0" implementation="binaryLoadMapLoader"/>
+			</hz:map>
+			
+			<hz:services>
+				<hz:service>
+					<hz:name>BinaryLoadService</hz:name>
+					<hz:class-name>hu.gerab.hz.binaryLoad.BinaryLoadService</hz:class-name>
+					<hz:properties>
+						<hz:property name="hu.gerab.hazelcast.binaryLoad.enabled">
+							${hu.gerab.hazelcast.binaryLoad.enabled}
+						</hz:property>
+						<hz:property name="hu.gerab.hazelcast.binaryLoad.storageDir">
+							${hu.gerab.hazelcast.binaryLoad.storageDir}
+						</hz:property>
+					</hz:properties>
+				</hz:service>
+			</hz:services>
+			
+			
+			<hz:lite-member enabled="false"/>
+		</hz:config>
+	</hz:hazelcast>
+	
+	<!--   SPRING BEANS   -->
+	<bean id="binaryLoadMapLoader" class="hu.gerab.hz.binaryLoad.helper.TestDataBinaryLoadMapLoader"/>
+	
+	<hz:map instance-ref="hazelcastInstance" id="binaryLoadMap" name="binaryLoadMap"/>
 
 </beans>

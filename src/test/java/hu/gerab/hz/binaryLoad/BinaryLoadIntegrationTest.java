@@ -6,6 +6,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 
 import java.io.File;
@@ -24,12 +25,14 @@ import javax.annotation.Resource;
 import hu.gerab.hz.binaryLoad.helper.TestDataBinaryLoadMapLoader;
 import hu.gerab.hz.binaryLoad.helper.TestUtils;
 
+import static hu.gerab.hz.binaryLoad.BinaryLoadMapServiceContextImpl.*;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration("classpath:hazelcast-context.xml")
+@TestPropertySource("classpath:application.properties")
 public class BinaryLoadIntegrationTest {
 
     public static final String BINARY_LOAD_MAP_NAME = "binaryLoadMap";
@@ -41,23 +44,18 @@ public class BinaryLoadIntegrationTest {
     @Autowired
     private TestDataBinaryLoadMapLoader testDataBinaryLoadMapLoader;
 
-    private static final Map<String, String> binaryMapContent = new TreeMap<>();
-
-    static {
-        binaryMapContent.put("Mikey", "Loves Pizza");
-        binaryMapContent.put("Leo", "Loves Swords");
-        binaryMapContent.put("Raph", "Loves Fighting");
-        binaryMapContent.put("Donnie", "Loves Tech");
-    }
-
-
     @BeforeClass
     public static void setUp() throws Exception {
         // replace previously saved binary data
         Path cacheDir = STORAGE_DIR.resolve(BINARY_LOAD_MAP_NAME);
         Files.createDirectories(cacheDir);
+        try (OutputStream outStream = new FileOutputStream(STORAGE_DIR.resolve(PARTITION_INFO_FILE).toFile())
+        ) {
+            outStream.write("4".getBytes());
+        }
+
         for (int i = 0; i < 4; i++) {
-            String fileName = i + ".part";
+            String fileName = i + BinaryLoadRecordStore.EXTENSION;
             String resourcePath = "previousBinaryLoadMapData" + File.separator + fileName;
             Path outputPath = cacheDir.resolve(fileName);
             try (InputStream inputStream = BinaryLoadIntegrationTest.class.getClassLoader().getResourceAsStream(resourcePath)
@@ -85,11 +83,15 @@ public class BinaryLoadIntegrationTest {
     public void testBinaryLoad() throws Exception {
         Set<String> keys = binaryLoadMap.keySet();
         assertThat(keys.size(), equalTo(5));
-        Map<String, String> loaderDataMap = testDataBinaryLoadMapLoader.getTestKeyToDataMap();
-        for (Map.Entry<String, String> entry : loaderDataMap.entrySet()) {
-            assertThat(binaryLoadMap.get(entry.getKey()), is(entry.getValue()));
+
+        for (Map.Entry<String, String> entry : testDataBinaryLoadMapLoader.getTestKeyToDataMap().entrySet()) {
+            assertEntry(entry.getKey(), entry.getValue());
         }
-        assertThat(binaryLoadMap.get("Mike"), is("Getting smacked")); // only present in the mapLoader
-        assertThat(binaryLoadMap.get("Mikey"), is("Loves Pizza")); // only present in the binary data
+        assertEntry("Key 1", "Binary Only"); // only present in mapLoader data
+        assertEntry("Key 5", "MapLoader 5"); // only present in the binary data
+    }
+
+    private void assertEntry(String key, String value) {
+        assertThat(binaryLoadMap.get(key), is(value));
     }
 }
